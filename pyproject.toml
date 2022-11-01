@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=0.13,<0.14"]
+build-backend = "maturin"
+
+[project]
+name = "pydeno"
+version = "0.1.0"
+authors = [
+    {
+        name="Federico Terzi"
+    }
+]
+license={file="LICENSE"}
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+
+[project.urls]
+homepage = "https://github.com/federico-terzi/pydeno"
+documentation = "https://github.com/federico-terzi/pydeno"
+repository = "https://github.com/federico-terzi/pydeno"
