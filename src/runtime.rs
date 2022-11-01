@@ -5,30 +5,40 @@ use std::{
 };
 
 use deno_core::{JsRuntime, RuntimeOptions};
-use pyo3::prelude::*;
+use pyo3::{
+    exceptions::PyValueError,
+    prelude::*,
+    types::{PyDict, PyTuple},
+};
 
 use crate::{
+    conversion::{convert_py_value_to_json, convert_v8_value_to_py_value},
     exception::{TimeoutException, V8Exception},
-    value::convert_v8_value_to_py_value,
 };
 
 #[pyclass(unsendable)]
 pub struct DenoRuntime {
+    _preload_script: Option<String>,
     _runtime: RefCell<Option<JsRuntime>>,
 }
 
 #[pymethods]
 impl DenoRuntime {
     #[new]
-    fn new() -> Self {
-        DenoRuntime {
+    #[args(preload_script = "None")]
+    fn new(py: Python<'_>, preload_script: Option<&str>) -> Self {
+        let _self = DenoRuntime {
+            _preload_script: preload_script.map(String::from),
             _runtime: RefCell::new(None),
-        }
+        };
+
+        _self._reset_runtime(py);
+        _self
     }
 
     #[args(timeout_ms = "0")]
     fn eval(&self, py: Python<'_>, source_code: &str, timeout_ms: u64) -> PyResult<PyObject> {
-        let mut runtime_ref = self._get_runtime();
+        let mut runtime_ref = self._get_runtime(py);
         let runtime = runtime_ref.as_mut().expect("unable to obtain runtime");
 
         if timeout_ms == 0 {
@@ -45,19 +55,45 @@ impl DenoRuntime {
             }
         }
     }
+
+    #[args(py_args = "*", py_kwargs = "**")]
+    fn call(
+        &self,
+        py: Python<'_>,
+        function_name: &str,
+        py_args: &PyTuple,
+        py_kwargs: Option<&PyDict>,
+    ) -> PyResult<PyObject> {
+        let timeout_ms = py_kwargs
+            .and_then(|args| args.get_item("timeout_ms"))
+            .and_then(|timeout| timeout.extract::<u64>().ok())
+            .unwrap_or(0);
+
+        let json_args: Vec<serde_json::Value> = py_args
+            .iter()
+            .map(convert_py_value_to_json)
+            .collect::<PyResult<Vec<serde_json::Value>>>()?;
+        let serialized_args = serde_json::to_string(&json_args).map_err(|err| {
+            PyValueError::new_err(format!("unable to serialize function arguments: {:?}", err))
+        })?;
+
+        let code = format!("{}.apply(this, {})", function_name, serialized_args);
+        self.eval(py, &code, timeout_ms)
+    }
 }
 
 impl DenoRuntime {
-    fn _initialize_runtime(&self) {
+    fn _reset_runtime(&self, py: Python<'_>) {
         let runtime = JsRuntime::new(RuntimeOptions::default());
         self._runtime.replace(Some(runtime));
+
+        if let Some(preload_script) = self._preload_script.as_deref() {
+            self.eval(py, preload_script, 0)
+                .expect("error while executing preload script");
+        }
     }
 
-    fn _teardown_runtime(&self) {
-        self._runtime.take();
-    }
-
-    fn _get_runtime(&self) -> RefMut<Option<JsRuntime>> {
+    fn _get_runtime(&self, py: Python<'_>) -> RefMut<Option<JsRuntime>> {
         {
             let runtime = self._runtime.borrow_mut();
             if runtime.is_some() {
@@ -65,7 +101,7 @@ impl DenoRuntime {
             }
         }
 
-        self._initialize_runtime();
+        self._reset_runtime(py);
         self._runtime.borrow_mut()
     }
 

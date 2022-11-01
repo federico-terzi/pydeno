@@ -9,7 +9,7 @@ def task_maturin_develop():
 
 def task_test():
     return {
-        "actions": ["pytest"],
+        "actions": ["pytest -s"],
         "task_dep": ["maturin_develop"],
         "io": {
             "capture": False,

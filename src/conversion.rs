@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+
 use deno_core::v8::{Context, GetPropertyNamesArgs, HandleScope, Value};
 use pyo3::{
     exceptions::PyValueError,
-    types::{PyDict, PyList},
-    IntoPy, PyObject, PyResult, Python,
+    types::{PyBool, PyDict, PyFloat, PyList, PyLong, PyTuple, PyUnicode},
+    IntoPy, PyAny, PyObject, PyResult, Python,
 };
+use serde_json::Map;
 
 use crate::exception::V8Exception;
 
@@ -87,5 +90,51 @@ pub fn convert_v8_value_to_py_value(
 
     Err(PyValueError::new_err(
         "unable to unpack V8 value, no conversion handler has been defined for this type",
+    ))
+}
+
+pub fn convert_py_value_to_json(value: &PyAny) -> PyResult<serde_json::Value> {
+    if value.is_instance_of::<PyBool>()? {
+        return Ok(serde_json::Value::Bool(value.extract::<bool>()?));
+    } else if value.is_instance_of::<PyLong>()? {
+        return Ok(serde_json::Value::Number(serde_json::Number::from(
+            value.extract::<i64>()?,
+        )));
+    } else if value.is_instance_of::<PyFloat>()? {
+        return Ok(serde_json::Value::Number(
+            serde_json::Number::from_f64(value.extract::<f64>()?)
+                .ok_or_else(|| PyValueError::new_err("unable to serialize float value"))?,
+        ));
+    } else if value.is_instance_of::<PyUnicode>()? {
+        return Ok(serde_json::Value::String(value.extract::<String>()?));
+    } else if value.is_instance_of::<PyList>()? {
+        let values = value.extract::<Vec<&PyAny>>()?;
+        return Ok(serde_json::Value::Array(
+            values
+                .into_iter()
+                .map(convert_py_value_to_json)
+                .collect::<PyResult<Vec<serde_json::Value>>>()?,
+        ));
+    } else if value.is_instance_of::<PyTuple>()? {
+        let tuple = value.extract::<&PyTuple>()?;
+        return Ok(serde_json::Value::Array(
+            tuple
+                .into_iter()
+                .map(convert_py_value_to_json)
+                .collect::<PyResult<Vec<serde_json::Value>>>()?,
+        ));
+    } else if value.is_instance_of::<PyDict>()? {
+        let py_map = value.extract::<HashMap<String, &PyAny>>()?;
+        let map = py_map
+            .iter()
+            .map(|(key, value)| Ok((key.to_string(), convert_py_value_to_json(value)?)))
+            .collect::<PyResult<Map<String, serde_json::Value>>>()?;
+        return Ok(serde_json::Value::Object(map));
+    } else if value.is_none() {
+        return Ok(serde_json::Value::Null);
+    }
+
+    Err(PyValueError::new_err(
+        "unable to serialize Python value, no conversion handler has been defined for this type",
     ))
 }
