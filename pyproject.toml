@@ -6,9 +6,7 @@ build-backend = "maturin"
 name = "pydeno"
 version = "0.1.0"
 authors = [
-    {
-        name="Federico Terzi"
-    }
+    {name="Federico Terzi"}
 ]
 license={file="LICENSE"}
 requires-python = ">=3.7"
